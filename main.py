@@ -232,6 +232,10 @@ def main():
     parser.add_argument("--net", type=str, default=None, choices=net_choices)
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
+    parser.add_argument("--smooth_down_proj",default=False, action="store_true", help="smooth down projection")
+    parser.add_argument("--onnx_dump_dir", type=str, default=".", help="Directory path to dump onnx model")
+    parser.add_argument("--sequence_length", type=int, default=256)
+    parser.add_argument("--quant_path", default=None, type=str, help="cache dir of dataset, leading to faster debug")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -263,6 +267,7 @@ def main():
     # assert args.net in net_choices
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
+    # lm.model.load_state_dict(torch.load("/auto/regrt/sw/titash/qwen_int4/int4weights.dat", map_location="auto"))
     lm.seqlen = 2048
     lm.model.eval()
     for param in lm.model.parameters():
@@ -342,19 +347,19 @@ def main():
         if args.let:
             act_scales = torch.load(args.act_scales)
             act_shifts = torch.load(args.act_shifts)
-        omniquant(
-            lm,
-            args,
-            dataloader,
-            act_scales,
-            act_shifts,
-            logger,
-        )
+        # omniquant(
+        #     lm,
+        #     args,
+        #     dataloader,
+        #     act_scales,
+        #     act_shifts,
+        #     logger,
+        # )
         logger.info(time.time() - tick)
     if args.save_dir:
         # delete omni parameters
         for name, module in lm.model.named_modules():
-            if isinstance(module, QuantLinear):
+            if isinstance(module, QuantLinear) and args.lwc:
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
@@ -367,6 +372,13 @@ def main():
                     del module.fc1_smooth_shift           
         lm.model.save_pretrained(args.save_dir)  
         lm.tokenizer.save_pretrained(args.save_dir) 
+    logger.info(f"Saving the model to onnx, save_dir: {args.onnx_dump_dir}")
+    commands_to_run = [f"optimum-cli export onnx --model {args.save_dir} {args.save_dir} --trust-remote-code --task=text-generation --sequence_length {args.sequence_length} --batch_size {args.batch_size}", \
+                       "export PYTHONPATH=/users/aditya/.local/lib/python3.8/site-packages:/auto/worka/aditya/scratch/llm/onnxsim_large_model:$PYTHONPATH", \
+                       f"python3 simplify_large_onnx.py -m {args.save_dir}/model.onnx -o {args.onnx_dump_dir}"]
+    for command in commands_to_run:
+        logger.info(f"Running command: {command}")
+        os.system(command)
     evaluate(lm, args,logger)
 
 

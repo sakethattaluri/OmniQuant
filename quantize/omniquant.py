@@ -11,6 +11,7 @@ import utils
 import os
 import pdb
 import gc
+import numpy as np
 from quantize.utils import let_parameters, lwc_parameters, get_omni_parameters,\
                             omni_state_dict, register_scales_and_zeros,smooth_and_quant_temporary,\
                             smooth_and_quant_inplace,clear_temp_variable,set_quant_state
@@ -66,6 +67,8 @@ def omniquant(
             "o_proj":"out",
             "up_proj":"fc1"
         }
+        if args.smooth_down_proj:
+            pairs["down_proj"] = "fc2"
         layer_name_prefix = "model.layers"
     elif "opt" in args.net.lower():
         layers = model.model.decoder.layers
@@ -187,8 +190,13 @@ def omniquant(
     else:
         omni_parameters = {}
 
-    
-    
+    import json
+    import pandas as pd
+    quant_strategy = None
+    args.quant_strategy = None
+    if args.quant_path is not None:
+        df = pd.read_csv(args.quant_path, index_col="layer")
+        quant_strategy = json.loads(df.to_json(orient="index"))
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
         layer = layers[i].to(dev)
@@ -200,6 +208,23 @@ def omniquant(
                     quantlinear = QuantLinear(module, args.weight_quant_params, args.act_quant_params)
                     add_new_module(name, qlayer, quantlinear)    
         else:
+            # if (i == 0 or i == 1 or i == 27):
+            #     args.weight_quant_params["n_bits"] = 4
+            #     args.weight_quant_params["group_size"] = 128
+            if 22 <= i <= 27:
+                args.weight_quant_params["n_bits"] = 2
+                args.weight_quant_params["group_size"] = 64
+            else:
+                args.weight_quant_params["n_bits"] = 3
+                args.weight_quant_params["group_size"] = 64
+            # args.weight_quant_params["n_bits"] = 4
+            # args.weight_quant_params["group_size"] = 128
+            if quant_strategy is not None:
+                print(quant_strategy[str(i)])
+                args.quant_strategy = quant_strategy[str(i)]
+            else:
+                print(args.weight_quant_params)
+                print(args.act_quant_params)
             qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
 
@@ -235,7 +260,7 @@ def omniquant(
                                 shift = torch.zeros_like(scale)
                             qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift))
                             qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
-                                
+
         if args.resume:
             qlayer.load_state_dict(omni_parameters[i], strict=False)
         
@@ -280,8 +305,8 @@ def omniquant(
         if args.epochs>0:
             # update input of quantization model
             with torch.no_grad():
-                # with torch.cuda.amp.autocast():
-                with traincast():
+                with torch.cuda.amp.autocast():
+                # with traincast():
                     for j in range(args.nsamples):
                         quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
             register_scales_and_zeros(qlayer)
@@ -291,6 +316,9 @@ def omniquant(
         else:
             register_scales_and_zeros(qlayer)
             layers[i] = qlayer.to("cpu")
+        # for name, par in qlayer.named_parameters():
+        #     if "scale" in name or "shift" in name:
+        #         par.cpu().detach().numpy().tofile(f"qlayer_{i}_{name}.bin")
         if args.real_quant:
             assert args.wbits in [2,3,4] and args.abits >= 16   # only support weight-only quantization
             named_linears = get_named_linears(qlayer)

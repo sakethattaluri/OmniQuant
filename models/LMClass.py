@@ -5,6 +5,7 @@ from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
 import torch.nn.functional as F
 from torch import nn
 import torch
+import numpy as np
 from tqdm import tqdm
 import pdb
 
@@ -24,9 +25,17 @@ class LMClass(BaseLM):
             args.model, attn_implementation=args.attn_implementation
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False,legacy=False)
+        self.tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False,legacy=False,trust_remote_code=True)
         # self.model = AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=config.torch_dtype)
-        self.model = AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=torch.float16)
+        self.model = AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=torch.float16,trust_remote_code=True)
+        # bias_list = ['model.layers.0.self_attn.o_proj.bias', 'model.layers.1.self_attn.o_proj.bias', 'model.layers.10.self_attn.o_proj.bias', 'model.layers.11.self_attn.o_proj.bias', 'model.layers.12.self_attn.o_proj.bias', 'model.layers.13.self_attn.o_proj.bias', 'model.layers.14.self_attn.o_proj.bias', 'model.layers.15.self_attn.o_proj.bias', 'model.layers.16.self_attn.o_proj.bias', 'model.layers.17.self_attn.o_proj.bias', 'model.layers.18.self_attn.o_proj.bias', 'model.layers.19.self_attn.o_proj.bias', 'model.layers.2.self_attn.o_proj.bias', 'model.layers.20.self_attn.o_proj.bias', 'model.layers.21.self_attn.o_proj.bias', 'model.layers.22.self_attn.o_proj.bias', 'model.layers.23.self_attn.o_proj.bias', 'model.layers.24.self_attn.o_proj.bias', 'model.layers.25.self_attn.o_proj.bias', 'model.layers.26.self_attn.o_proj.bias', 'model.layers.27.self_attn.o_proj.bias', 'model.layers.28.self_attn.o_proj.bias', 'model.layers.29.self_attn.o_proj.bias', 'model.layers.3.self_attn.o_proj.bias', 'model.layers.30.self_attn.o_proj.bias', 'model.layers.31.self_attn.o_proj.bias', 'model.layers.4.self_attn.o_proj.bias', 'model.layers.5.self_attn.o_proj.bias', 'model.layers.6.self_attn.o_proj.bias', 'model.layers.7.self_attn.o_proj.bias', 'model.layers.8.self_attn.o_proj.bias', 'model.layers.9.self_attn.o_proj.bias']
+        # val = torch.load("/auto/regrt/sw/titash/qwen_int4/int4weights.dat", map_location="cpu")
+        # print(self.model.state_dict().keys())
+        
+        # for k in self.model.state_dict().keys():
+        #     if 'down_proj' not in k:
+        #         val[k] = self.model.state_dict()[k]
+        # self.model.load_state_dict(val)
         self.seqlen = self.model.config.max_position_embeddings
         self.model.eval()
         self.vocab_size = self.tokenizer.vocab_size

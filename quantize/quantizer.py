@@ -6,6 +6,7 @@ import tqdm
 import numpy as np
 import pdb
 import math
+import random
 
 CLIPMIN = 1e-5
 
@@ -91,7 +92,13 @@ class UniformAffineQuantizer(nn.Module):
             self.qmin = 0
             self.qmax = 2 ** (n_bits) - 1
 
-    def fake_quant(self, x, scale, round_zero_point):
+    def fake_quant(self, x, scale, round_zero_point, dump=False):
+        # a = int(random.randint(0, 10000))
+        if dump:
+            x.cpu().detach().numpy().astype(np.float32).tofile(f"kproj_wt.bin")
+            scale.cpu().detach().numpy().astype(np.float32).tofile(f"kproj_scale.bin")
+            if round_zero_point is not None:
+                round_zero_point.cpu().detach().numpy().astype(np.float32).tofile(f"kproj_round_zero_point.bin")
         if self.deficiency > 0:
             pad_zeros = torch.zeros((x.shape[0],self.deficiency),dtype=x.dtype,device=x.device)
             x = torch.cat((x,pad_zeros),dim=1)
@@ -101,6 +108,8 @@ class UniformAffineQuantizer(nn.Module):
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
         x_int = round_ste(x / scale)
+        if dump:
+            x_int.cpu().detach().numpy().astype(np.float32).tofile(f"kproj_wt_int.bin")
         if round_zero_point is not None:
             x_int = x_int.add(round_zero_point)
         x_int = x_int.clamp(self.qmin, self.qmax)
@@ -112,10 +121,12 @@ class UniformAffineQuantizer(nn.Module):
             x_dequant = x_dequant.reshape(dim1, dim2)
         if self.deficiency > 0:
             x_dequant = x_dequant[:,:-self.deficiency]
+        if dump:
+            x_dequant.cpu().detach().numpy().astype(np.float32).tofile(f"kproj_wt_dequant.bin")
         return x_dequant
     
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, dump=False):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
@@ -126,7 +137,7 @@ class UniformAffineQuantizer(nn.Module):
         else:
             raise NotImplementedError()   
 
-        x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+        x_dequant = self.fake_quant(x, self.scale, self.round_zero_point, dump)
         return x_dequant
 
     def per_token_dynamic_calibration(self, x):

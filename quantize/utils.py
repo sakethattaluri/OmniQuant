@@ -74,6 +74,9 @@ def smooth_and_quant_temporary(model, args, isllama):
                                 model.out_smooth_scale, model.out_smooth_shift)
             smooth_q_k_temporary(model.self_attn.q_proj, model.self_attn.k_proj,
                                 model.qkt_smooth_scale)
+            if args.smooth_down_proj:
+                smooth_fc_fc_temporary(model.mlp.up_proj,model.mlp.down_proj,
+                           model.fc2_smooth_scale, model.fc2_smooth_shift)
             model.mlp.down_proj.temp_weight = model.mlp.down_proj.weight
         else:
             smooth_ln_fcs_temporary(model.self_attn_layer_norm,[model.self_attn.q_proj, model.self_attn.k_proj, model.self_attn.v_proj],
@@ -92,10 +95,12 @@ def smooth_and_quant_temporary(model, args, isllama):
     # quant
     for name, module in model.named_modules():
         if isinstance(module, QuantLinear):
+            dump_par = False#True if "k_proj" in name else False
+            # print(name, dump_par)
             if hasattr(module, "temp_weight"):
-                module.temp_weight = module.weight_quantizer(module.temp_weight)
+                module.temp_weight = module.weight_quantizer(module.temp_weight, dump=dump_par)
             else:
-                module.temp_weight = module.weight_quantizer(module.weight)
+                module.temp_weight = module.weight_quantizer(module.weight, dump=dump_par)
             if not hasattr(module, "temp_bias"):
                 module.temp_bias = module.bias
             module.use_temporary_parameter=True
@@ -121,6 +126,9 @@ def smooth_and_quant_inplace(model, args, isllama):
                                     model.fc1_smooth_scale,model.fc1_smooth_shift)
             smooth_fc_fc_inplace(model.self_attn.v_proj,model.self_attn.o_proj,
                                 model.out_smooth_scale, model.out_smooth_shift)
+            if args.smooth_down_proj:
+                smooth_fc_fc_inplace(model.mlp.up_proj,model.mlp.down_proj,
+                           model.fc2_smooth_scale, model.fc2_smooth_shift)
         else: # opt
             smooth_ln_fcs_inplace(model.self_attn_layer_norm,[model.self_attn.q_proj, model.self_attn.k_proj, model.self_attn.v_proj],
                                     model.qkv_smooth_scale,model.qkv_smooth_shift)
